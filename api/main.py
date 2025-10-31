@@ -25,7 +25,7 @@ from knowledge_base_manager import log_message
 app = Flask(__name__)
 
 # Configuração do CORS
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
+CORS(app, resources={r"/api/*": {"origins": "*"}}) # Permitir todas as origens para a Vercel
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -55,7 +55,22 @@ def chat():
 
 @app.route('/api/teach_rule', methods=['POST'])
 def teach_rule():
-    return jsonify({"message": "Endpoint em desenvolvimento."}), 501
+    """
+    Endpoint específico para ensinar regras.
+    """
+    try:
+        data = request.json
+        if not data or 'rule' not in data:
+            return jsonify({"error": "O campo 'rule' é obrigatório."}), 400
+
+        rule_text = data.get('rule')
+        response_text = learn_new_rule(rule_text)
+
+        return jsonify({"text": response_text})
+
+    except Exception as e:
+        log_message("CRITICAL", f"Erro fatal no endpoint /api/teach_rule: {e}")
+        return jsonify({"error": "Ocorreu um erro interno no servidor."}), 500
 
 @app.route('/api/explain', methods=['GET'])
 def explain():
@@ -75,6 +90,10 @@ def final_initialization_check():
 
     print("\033[92mInicialização do JARVIS concluída. Servidor pronto para receber requisições.\033[0m")
 
+# Executa a verificação final durante a inicialização do módulo.
+final_initialization_check()
+
+# O objeto 'app' será pego pelo Vercel (ou outro servidor WSGI).
+# O if __name__ == '__main__': app.run(...) é apenas para desenvolvimento local.
 if __name__ == '__main__':
-    final_initialization_check()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)

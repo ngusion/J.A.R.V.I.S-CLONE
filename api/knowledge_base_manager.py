@@ -1,8 +1,8 @@
 import sqlite3
 import json
 from datetime import datetime
-
-DB_PATH = 'jarvis.db'
+# Importa o DB_PATH do novo arquivo de configuração centralizado.
+from config import DB_PATH
 
 def get_db_connection():
     """Cria e retorna uma conexão com o banco de dados."""
@@ -18,8 +18,10 @@ def log_message(log_type: str, message: str):
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
-        print(f"Erro ao registrar log no banco de dados: {e}")
+        # Evita um loop de logs se o próprio log falhar
+        print(f"Erro ao registrar log no banco de dados: {e}", file=sys.stderr)
 
+# ... (o resto do arquivo permanece o mesmo)
 # Funções para a Base de Conhecimento (KB)
 def add_fact(fact: str, concept: str, relationship: str, source: str = "user", confidence: float = 1.0, metadata: dict = None):
     """Adiciona um novo fato à base de conhecimento."""

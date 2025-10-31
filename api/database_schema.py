@@ -1,7 +1,10 @@
 import sqlite3
+# Importa o DB_PATH do novo arquivo de configuração centralizado.
+from config import DB_PATH
 
 def create_schema():
-    conn = sqlite3.connect('jarvis.db')
+    # Conecta ao banco de dados usando o caminho centralizado
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Tabela da Base de Conhecimento (KB)
@@ -53,6 +56,7 @@ def create_schema():
 
     conn.commit()
     conn.close()
+    print(f"Schema do banco de dados em '{DB_PATH}' verificado e/ou criado com sucesso.")
 
 if __name__ == '__main__':
     create_schema()
