@@ -1,0 +1,8 @@
+{
+  "name": "Assistente Gemini Clone",
+  "description": "Uma réplica da interface do Gemini com uma ampla gama de funcionalidades, incluindo chat, geração de imagem e vídeo, conversação em tempo real, e mais, tudo alimentado pela API do Gemini.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
