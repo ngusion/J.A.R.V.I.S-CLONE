@@ -1,11 +1,10 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { GroundingChunk } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("A variável de ambiente API_KEY não está definida.");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// A chave da API é opcional na inicialização para permitir que o app carregue.
+// As funções individuais verificarão se a chave é necessária.
+const apiKey = process.env.API_KEY;
+const ai = new GoogleGenAI({ apiKey: apiKey || "" });
 
 const getVeoAiClient = async () => {
     // @ts-ignore

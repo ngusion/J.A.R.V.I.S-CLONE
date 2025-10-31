@@ -132,11 +132,37 @@ const App: React.FC = () => {
             // ... (switch case para as ferramentas, igual ao anterior)
             switch (tool) {
                 case Tool.CHAT:
-                    const modelToUse = currentModel === Model.PRO ? 'gemini-2.5-pro' : 'gemini-flash-lite-latest';
-                    const textResult = currentModel === Model.PRO 
-                        ? await generateComplexText(prompt) 
-                        : await generateText(prompt, modelToUse);
-                    responseText = textResult;
+                    try {
+                        const response = await fetch('/api/chat', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                prompt: prompt,
+                                conversation_id: activeConversationId
+                            }),
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                        }
+
+                        const result = await response.json();
+                        responseText = result.text;
+
+                        // O backend agora gerencia o ID, mas podemos garantir que o frontend está sincronizado
+                        if (result.conversation_id && !activeConversationId) {
+                            // Esta parte pode ser ajustada dependendo de como você gerencia a criação de conversas
+                            // A lógica atual já cria uma nova conversa, então apenas garantimos a consistência.
+                            console.log("Backend retornou conversation_id:", result.conversation_id);
+                        }
+
+                    } catch (fetchError) {
+                        console.error("Erro ao chamar o backend do JARVIS:", fetchError);
+                        responseText = `Não foi possível conectar ao JARVIS. ${fetchError.message}`;
+                    }
                     break;
                 case Tool.SEARCH:
                     const searchResult = await generateTextWithGoogleSearch(prompt);
