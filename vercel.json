@@ -20,10 +20,6 @@
       "dest": "api/main.py"
     },
     {
-      "src": "/assets/(.*)",
-      "handle": "filesystem"
-    },
-    {
       "src": "/(.*)",
       "dest": "/index.html"
     }

@@ -8,7 +8,7 @@ async def main():
 
         try:
             # Navigate to the local development server.
-            await page.goto("http://localhost:3000")
+            await page.goto("http://localhost:3001")
 
             # The React app is mounted on the element with id 'root'.
             # We will wait for this element to have at least one child to confirm React has rendered.
