@@ -27,17 +27,6 @@ export interface GroundingChunk {
     };
 }
 
-export enum Tool {
-    CHAT = "CHAT",
-    SEARCH = "SEARCH",
-    MAPS = "MAPS",
-    IMAGE_GEN = "IMAGE_GEN",
-    ANALYZE_IMAGE = "ANALYZE_IMAGE",
-    EDIT_IMAGE = "EDIT_IMAGE",
-    VIDEO_GEN_TEXT = "VIDEO_GEN_TEXT",
-    VIDEO_GEN_IMAGE = "VIDEO_GEN_IMAGE",
-}
-
 export enum Model {
     PRO = "2.5 Pro",
     FLASH = "2.5 Flash",

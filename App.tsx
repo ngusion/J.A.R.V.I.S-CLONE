@@ -4,7 +4,7 @@ import Header from './components/Header';
 import ChatView from './components/ChatView';
 import PromptInput from './components/PromptInput';
 import WelcomeScreen from './components/WelcomeScreen';
-import { Message, Tool, Model, AspectRatio, GroundingChunk, Conversation } from './types';
+import { Message, Model, GroundingChunk, Conversation } from './types';
 import { 
     generateText, 
     generateTextWithGoogleSearch, 
@@ -14,9 +14,12 @@ import {
     editImage, 
     generateVideoFromText, 
     generateVideoFromImage,
-    generateComplexText
+    generateComplexText,
+    textToSpeech
 } from './services/geminiService';
+import { geminiTools, toolStatusMessages } from './services/geminiTools';
 import { useLiveConversation } from './hooks/useLiveConversation';
+import { GoogleGenAI } from "@google/genai";
 
 type Theme = 'light' | 'dark';
 
@@ -94,7 +97,11 @@ const App: React.FC = () => {
         );
     };
     
-    const handleSend = async (prompt: string, tool: Tool, file?: File, aspectRatio?: AspectRatio) => {
+    /**
+     * Nova implementação do handleSend com loop de agente autônomo
+     * A IA decide qual ferramenta usar através de Function Calling
+     */
+    const handleSend = async (prompt: string, file?: File) => {
         if (!prompt && !file) return;
     
         setIsLoading(true);
@@ -125,106 +132,197 @@ const App: React.FC = () => {
         }
     
         try {
-            let responseText: string | null = null;
-            let responseParts: Message['parts'] = [];
-            let sources: GroundingChunk[] = [];
-    
-            // ... (switch case para as ferramentas, igual ao anterior)
-            switch (tool) {
-                case Tool.CHAT:
-                    try {
-                        const response = await fetch('/api/chat', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                prompt: prompt,
-                                conversation_id: activeConversationId
-                            }),
-                        });
-
-                        if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-                        }
-
-                        const result = await response.json();
-                        responseText = result.text;
-
-                        // O backend agora gerencia o ID, mas podemos garantir que o frontend está sincronizado
-                        if (result.conversation_id && !activeConversationId) {
-                            // Esta parte pode ser ajustada dependendo de como você gerencia a criação de conversas
-                            // A lógica atual já cria uma nova conversa, então apenas garantimos a consistência.
-                            console.log("Backend retornou conversation_id:", result.conversation_id);
-                        }
-
-                    } catch (fetchError) {
-                        console.error("Erro ao chamar o backend do JARVIS:", fetchError);
-                        responseText = `Não foi possível conectar ao JARVIS. ${fetchError.message}`;
-                    }
-                    break;
-                case Tool.SEARCH:
-                    const searchResult = await generateTextWithGoogleSearch(prompt);
-                    responseText = searchResult.text;
-                    sources = searchResult.sources;
-                    break;
-                case Tool.MAPS:
-                    const mapsResult = await generateTextWithGoogleMaps(prompt);
-                    responseText = mapsResult.text;
-                    sources = mapsResult.sources;
-                    break;
-                case Tool.IMAGE_GEN:
-                    const imageUrl = await generateImage(prompt, aspectRatio || '1:1');
-                    responseParts.push({ inlineData: { mimeType: 'image/jpeg', data: imageUrl } });
-                    break;
-                case Tool.ANALYZE_IMAGE:
-                    if (file) {
-                        responseText = await analyzeImage(prompt, file);
-                    }
-                    break;
-                case Tool.EDIT_IMAGE:
-                    if (file) {
-                        const editedImageUrl = await editImage(prompt, file);
-                        responseParts.push({ inlineData: { mimeType: file.type, data: editedImageUrl } });
-                    }
-                    break;
-                case Tool.VIDEO_GEN_TEXT:
-                     if(currentConvId) addMessageToConversation(currentConvId, { role: 'model', parts: [{ text: 'Iniciando a geração do vídeo. Isso pode levar alguns minutos...' }] });
-                    const videoUrlText = await generateVideoFromText(prompt, aspectRatio as '16:9' | '9:16' || '16:9');
-                    responseParts.push({ text: `Vídeo gerado com sucesso!`, inlineData: { mimeType: 'video/mp4', data: videoUrlText } });
-                    break;
-                case Tool.VIDEO_GEN_IMAGE:
-                     if (file && currentConvId) {
-                        addMessageToConversation(currentConvId, { role: 'model', parts: [{ text: 'Iniciando a geração do vídeo a partir da imagem. Isso pode levar alguns minutos...' }] });
-                        const videoUrlImage = await generateVideoFromImage(prompt, file, aspectRatio as '16:9' | '9:16' || '16:9');
-                        responseParts.push({ text: `Vídeo gerado com sucesso!`, inlineData: { mimeType: 'video/mp4', data: videoUrlImage } });
-                    }
-                    break;
+            // Inicializar o cliente Gemini
+            if (!process.env.API_KEY) {
+                throw new Error("A variável de ambiente API_KEY não está definida.");
             }
-    
-            if (responseText) {
-                responseParts.push({ text: responseText });
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            // Selecionar o modelo baseado na escolha do usuário
+            const modelName = currentModel === Model.PRO ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+            const model = ai.models.getGenerativeModel({ model: modelName });
+            
+            // Preparar o histórico de mensagens para o contexto
+            const conversationHistory = activeConversation?.messages || [];
+            const historyForGemini = conversationHistory.map(msg => ({
+                role: msg.role,
+                parts: msg.parts
+            }));
+            
+            // Iniciar chat com histórico e ferramentas
+            const chat = model.startChat({
+                history: historyForGemini,
+                tools: geminiTools,
+            });
+            
+            // Enviar a mensagem do usuário
+            let result = await chat.sendMessage(userMessage.parts);
+            
+            // Loop de agente: processar functionCalls até obter resposta final
+            let maxIterations = 10; // Prevenir loops infinitos
+            let iteration = 0;
+            
+            while (iteration < maxIterations) {
+                iteration++;
+                
+                const response = result.response;
+                const functionCall = response.candidates?.[0]?.content?.parts?.find(part => part.functionCall);
+                
+                // Se não houver functionCall, a IA retornou a resposta final
+                if (!functionCall) {
+                    // Extrair texto e fontes da resposta final
+                    const responseText = response.text;
+                    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+                    
+                    if (responseText && currentConvId) {
+                        const modelMessage: Message = { 
+                            role: 'model', 
+                            parts: [{ text: responseText }],
+                            sources: sources as GroundingChunk[]
+                        };
+                        addMessageToConversation(currentConvId, modelMessage);
+                    }
+                    break;
+                }
+                
+                // Processar o functionCall
+                const functionName = functionCall.functionCall.name;
+                const functionArgs = functionCall.functionCall.args;
+                
+                console.log(`🤖 Agente decidiu usar: ${functionName}`, functionArgs);
+                
+                // Adicionar mensagem de status ao chat
+                const statusMessage = toolStatusMessages[functionName] || "🤖 Processando...";
+                if (currentConvId) {
+                    addMessageToConversation(currentConvId, { 
+                        role: 'model', 
+                        parts: [{ text: statusMessage }] 
+                    });
+                }
+                
+                // Executar a função correspondente com tratamento de erros
+                let functionResult: any;
+                try {
+                    functionResult = await executeFunctionCall(functionName, functionArgs, file);
+                } catch (error) {
+                    console.error(`Erro ao executar ${functionName}:`, error);
+                    functionResult = { 
+                        error: error instanceof Error ? error.message : "Erro desconhecido ao executar a ferramenta." 
+                    };
+                }
+                
+                // Enviar o resultado da função de volta para a IA
+                result = await chat.sendMessage([{
+                    functionResponse: {
+                        name: functionName,
+                        response: functionResult
+                    }
+                }]);
             }
-    
-            if (responseParts.length > 0 && currentConvId) {
-                const modelMessage: Message = { role: 'model', parts: responseParts, sources };
-                addMessageToConversation(currentConvId, modelMessage);
+            
+            if (iteration >= maxIterations) {
+                console.warn("Loop de agente atingiu o limite máximo de iterações");
+                if (currentConvId) {
+                    addMessageToConversation(currentConvId, { 
+                        role: 'model', 
+                        parts: [{ text: "Desculpe, encontrei dificuldades para processar sua solicitação completamente." }] 
+                    });
+                }
             }
     
         } catch (error) {
             console.error("Erro ao se comunicar com a API Gemini:", error);
             const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
             if (currentConvId) {
-                addMessageToConversation(currentConvId, { role: 'model', parts: [{ text: `Desculpe, ocorreu um erro: ${errorMessage}` }] });
+                addMessageToConversation(currentConvId, { 
+                    role: 'model', 
+                    parts: [{ text: `Desculpe, ocorreu um erro: ${errorMessage}` }] 
+                });
             }
         } finally {
             setIsLoading(false);
         }
     };
     
+    /**
+     * Executa a função correspondente ao functionCall da IA
+     */
+    const executeFunctionCall = async (functionName: string, args: any, file?: File): Promise<any> => {
+        switch (functionName) {
+            case 'generateText':
+                const textResult = await generateText(args.prompt);
+                return { text: textResult };
+                
+            case 'generateComplexText':
+                const complexTextResult = await generateComplexText(args.prompt);
+                return { text: complexTextResult };
+                
+            case 'generateTextWithGoogleSearch':
+                const searchResult = await generateTextWithGoogleSearch(args.prompt);
+                return { text: searchResult.text, sources: searchResult.sources };
+                
+            case 'generateTextWithGoogleMaps':
+                const mapsResult = await generateTextWithGoogleMaps(args.prompt);
+                return { text: mapsResult.text, sources: mapsResult.sources };
+                
+            case 'generateImage':
+                const imageUrl = await generateImage(args.prompt, args.aspectRatio || '1:1');
+                return { 
+                    imageUrl: imageUrl,
+                    message: "Imagem gerada com sucesso!",
+                    mimeType: 'image/jpeg'
+                };
+                
+            case 'analyzeImage':
+                if (!file) {
+                    throw new Error("Nenhuma imagem foi fornecida para análise.");
+                }
+                const analysisResult = await analyzeImage(args.prompt, file);
+                return { text: analysisResult };
+                
+            case 'editImage':
+                if (!file) {
+                    throw new Error("Nenhuma imagem foi fornecida para edição.");
+                }
+                const editedImageUrl = await editImage(args.prompt, file);
+                return { 
+                    imageUrl: editedImageUrl,
+                    message: "Imagem editada com sucesso!",
+                    mimeType: file.type
+                };
+                
+            case 'generateVideoFromText':
+                const videoUrlText = await generateVideoFromText(args.prompt, args.aspectRatio || '16:9');
+                return { 
+                    videoUrl: videoUrlText,
+                    message: "Vídeo gerado com sucesso!",
+                    mimeType: 'video/mp4'
+                };
+                
+            case 'generateVideoFromImage':
+                if (!file) {
+                    throw new Error("Nenhuma imagem foi fornecida para gerar o vídeo.");
+                }
+                const videoUrlImage = await generateVideoFromImage(args.prompt, file, args.aspectRatio || '16:9');
+                return { 
+                    videoUrl: videoUrlImage,
+                    message: "Vídeo gerado com sucesso!",
+                    mimeType: 'video/mp4'
+                };
+                
+            case 'textToSpeech':
+                const audioBuffer = await textToSpeech(args.text);
+                return { 
+                    message: "Áudio gerado com sucesso!",
+                    audioBuffer: audioBuffer
+                };
+                
+            default:
+                throw new Error(`Função desconhecida: ${functionName}`);
+        }
+    };
 
-     const toBase64 = (file: File): Promise<string | ArrayBuffer | null> => new Promise((resolve, reject) => {
+    const toBase64 = (file: File): Promise<string | ArrayBuffer | null> => new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
